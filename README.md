@@ -1,0 +1,1 @@
+pawn-repoPawn Repo is an internal web app for pawnshop staff to manage customers, record transactions, track pawned items, and print receipts. It streamlines daily operations with features like photo uploads, loan calculations, and a searchable dashboard. Designed for in-store use only.
