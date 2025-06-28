@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     JWT_REFRESH_SECRET_KEY: str = config("JWT_REFRESH_SECRET_KEY", cast=str)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = config(
         "BACKEND_CORS_ORIGINS", 
