@@ -1,7 +1,11 @@
+# backend/app/app.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.models.user_model import User
+from app.models.customer_model import Customer
+from app.models.item_model import Item
+from app.models.transaction_model import Transaction
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.api.api_v1.router import router
@@ -29,7 +33,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -48,7 +52,10 @@ async def app_init():
     await init_beanie(
         database=database,
         document_models=[
-            User
+            User,
+            Customer,
+            Item,
+            Transaction
         ]  # Add your document models here
     )
     
