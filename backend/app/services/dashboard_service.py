@@ -120,7 +120,7 @@ class DashboardService:
                     "type": transaction.transaction_type,
                     "amount": transaction.total_amount,
                     "customer_name": f"{customer.first_name} {customer.last_name}" if customer else "Unknown",
-                    "item_name": item.name if item else None,
+                    "item_name": item.description if item else None,
                     "date": transaction.transaction_date,
                     "receipt_number": transaction.receipt_number
                 })
@@ -155,7 +155,7 @@ class DashboardService:
                         "transaction_id": transaction.transaction_id,
                         "customer_name": f"{customer.first_name} {customer.last_name}",
                         "customer_phone": customer.phone,
-                        "item_name": item.name,
+                        "item_name": item.description,
                         "loan_amount": transaction.loan_amount,
                         "due_date": transaction.due_date,
                         "days_until_due": (transaction.due_date - date.today()).days
@@ -192,7 +192,7 @@ class DashboardService:
                         "transaction_id": transaction.transaction_id,
                         "customer_name": f"{customer.first_name} {customer.last_name}",
                         "customer_phone": customer.phone,
-                        "item_name": item.name,
+                        "item_name": item.description,
                         "loan_amount": transaction.loan_amount,
                         "due_date": transaction.due_date,
                         "days_overdue": (today - transaction.due_date).days,
