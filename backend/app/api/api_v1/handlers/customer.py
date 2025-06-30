@@ -1,4 +1,4 @@
-# backend/app/api/api_v1/handlers/customer.py
+# backend/app/api/api_v1/handlers/customer.py - CLEANED VERSION
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from uuid import UUID
@@ -108,19 +108,6 @@ async def delete_customer(
         )
     return {"message": "Customer deleted successfully"}
 
-@customer_router.patch("/{customer_id}/deactivate", summary="Deactivate customer (deprecated - use status update)", response_model=CustomerOut)
-async def deactivate_customer(
-    customer_id: UUID,
-    current_user: User = Depends(get_current_user)
-):
-    customer = await CustomerService.deactivate_customer(customer_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Customer not found"
-        )
-    return customer
-
 @customer_router.get("/", summary="Search customers", response_model=List[CustomerOut])
 async def search_customers(
     query: Optional[str] = Query(None, description="Search query (name or email) - min 3 chars for names"),
@@ -199,3 +186,14 @@ async def get_banned_customers(
 ):
     customers = await CustomerService.get_customers_by_status(CustomerStatus.BANNED)
     return customers
+
+@customer_router.post("/admin/restore-suspended", summary="Auto-restore expired suspensions", response_model=List[CustomerOut])
+async def auto_restore_suspended_customers(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Administrative endpoint to restore customers whose suspension period has ended.
+    This can be called manually or set up as a scheduled task.
+    """
+    restored_customers = await CustomerService.auto_restore_suspended_customers()
+    return restored_customers

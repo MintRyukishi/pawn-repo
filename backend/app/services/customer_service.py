@@ -1,33 +1,13 @@
-# backend/app/services/customer_service.py
+# backend/app/services/customer_service.py - CLEANED VERSION
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
 from app.models.customer_model import Customer, CustomerStatus
 from app.schemas.customer_schema import CustomerCreate, CustomerUpdate, CustomerSearch, CustomerStatusUpdate
+from app.utils.phone_utils import normalize_phone_number  # Use centralized utility
 from beanie import PydanticObjectId
 from beanie.operators import RegEx, Or, And
 import re
-
-def normalize_phone_number(phone: str) -> str:
-    """
-    Normalize phone number by removing all non-digit characters
-    and keeping only the last 10 digits for North American numbers
-    """
-    if not phone:
-        return phone
-    
-    # Remove all non-digit characters
-    digits_only = re.sub(r'\D', '', phone)
-    
-    # For North American numbers, keep last 10 digits
-    # This handles +1 country code
-    if len(digits_only) == 11 and digits_only.startswith('1'):
-        return digits_only[-10:]
-    elif len(digits_only) == 10:
-        return digits_only
-    else:
-        # Return as-is for other formats
-        return digits_only
 
 def parse_name_query(query: str) -> dict:
     """
@@ -62,7 +42,7 @@ def parse_name_query(query: str) -> dict:
 class CustomerService:
     @staticmethod
     async def create_customer(customer_data: CustomerCreate) -> Customer:
-        # Normalize phone number before saving
+        # Use centralized phone normalization
         normalized_phone = normalize_phone_number(customer_data.phone)
         customer_dict = customer_data.dict()
         customer_dict['phone'] = normalized_phone
@@ -77,7 +57,7 @@ class CustomerService:
 
     @staticmethod
     async def get_customer_by_phone(phone: str) -> Optional[Customer]:
-        # Normalize the search phone number
+        # Use centralized phone normalization
         normalized_phone = normalize_phone_number(phone)
         return await Customer.find_one(Customer.phone == normalized_phone)
 
@@ -89,7 +69,7 @@ class CustomerService:
         
         update_data = customer_data.dict(exclude_unset=True)
         
-        # Normalize phone number if it's being updated
+        # Use centralized phone normalization
         if 'phone' in update_data and update_data['phone']:
             update_data['phone'] = normalize_phone_number(update_data['phone'])
         
@@ -135,14 +115,6 @@ class CustomerService:
         return False
 
     @staticmethod
-    async def deactivate_customer(customer_id: UUID) -> Optional[Customer]:
-        """Deprecated - use update_customer_status instead"""
-        return await CustomerService.update_customer(
-            customer_id, 
-            CustomerUpdate(is_active=False)
-        )
-
-    @staticmethod
     async def search_customers(search_params: CustomerSearch, skip: int = 0, limit: int = 50) -> List[Customer]:
         query_conditions = []
         
@@ -154,7 +126,7 @@ class CustomerService:
             query_conditions.append(Customer.is_active == search_params.is_active)
         
         if search_params.phone:
-            # Normalize search phone for comparison
+            # Use centralized phone normalization
             normalized_phone = normalize_phone_number(search_params.phone)
             query_conditions.append(Customer.phone == normalized_phone)
             

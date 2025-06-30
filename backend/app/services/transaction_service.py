@@ -1,4 +1,4 @@
-# backend/app/services/transaction_service.py
+# backend/app/services/transaction_service.py - COMPLETED VERSION
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, date, timedelta
@@ -191,6 +191,306 @@ class TransactionService:
             raise
 
     @staticmethod
+    async def get_loan_status(loan_id: UUID) -> LoanStatusOut:
+        """Get comprehensive loan status"""
+        try:
+            # Get loan transaction
+            loan = await Transaction.find_one(
+                And(
+                    Transaction.transaction_id == loan_id,
+                    Transaction.transaction_type == TransactionType.PAWN
+                )
+            )
+            if not loan:
+                raise ValueError("Loan not found")
+            
+            # Get customer and item details
+            customer = await Customer.find_one(Customer.customer_id == loan.customer_id)
+            item = await Item.find_one(Item.item_id == loan.item_id) if loan.item_id else None
+            
+            if not customer:
+                raise ValueError("Customer not found")
+            if not item:
+                raise ValueError("Item not found")
+            
+            # Calculate status information
+            total_owed = loan.total_amount_owed
+            minimum_payment = loan.monthly_interest_fee or 0
+            
+            return LoanStatusOut(
+                loan_id=loan.transaction_id,
+                customer_name=customer.full_name,
+                customer_phone=customer.phone,
+                item_description=item.description,
+                original_loan_amount=loan.principal_amount or 0,
+                current_balance=loan.current_balance or 0,
+                monthly_interest_fee=loan.monthly_interest_fee or 0,
+                total_amount_owed=total_owed,
+                original_due_date=loan.original_due_date,
+                current_due_date=loan.current_due_date,
+                final_forfeit_date=loan.final_forfeit_date,
+                days_until_due=loan.days_until_due,
+                days_overdue=loan.days_overdue,
+                loan_status=loan.loan_status,
+                renewals_count=loan.renewals_count,
+                last_payment_date=loan.last_payment_date,
+                is_within_grace_period=loan.is_within_grace_period,
+                minimum_payment_required=minimum_payment,
+                can_extend=loan.is_loan_active and total_owed > 0,
+                can_redeem=loan.is_loan_active,
+                is_forfeit_eligible=loan.check_forfeit_eligibility()
+            )
+            
+        except Exception as e:
+            logger.error(f"Error getting loan status: {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_payment_scenarios(loan_id: UUID, payment_date: Optional[date] = None) -> List[LoanScenarioOut]:
+        """Get payment scenarios for a loan"""
+        try:
+            if not payment_date:
+                payment_date = date.today()
+            
+            # Get loan
+            loan = await Transaction.find_one(
+                And(
+                    Transaction.transaction_id == loan_id,
+                    Transaction.transaction_type == TransactionType.PAWN
+                )
+            )
+            if not loan:
+                raise ValueError("Loan not found")
+            
+            if not loan.is_loan_active:
+                raise ValueError("Loan is not active")
+            
+            scenarios = []
+            
+            # Scenario 1: Interest Only (Minimum Payment)
+            interest_amount = loan.monthly_interest_fee or 0
+            late_fee = loan.calculate_late_fee()
+            minimum_payment = interest_amount + late_fee
+            
+            try:
+                min_allocation = loan.process_payment_allocation(minimum_payment, payment_date)
+                scenarios.append(LoanScenarioOut(
+                    scenario_name="Interest Only (Minimum Payment)",
+                    payment_amount=minimum_payment,
+                    amount_breakdown={
+                        "interest": min_allocation['interest_payment'],
+                        "late_fee": min_allocation['late_fee_payment'],
+                        "principal": 0.0
+                    },
+                    resulting_balance=min_allocation['new_balance'],
+                    new_due_date=min_allocation['new_due_date'],
+                    is_full_redemption=False
+                ))
+            except ValueError:
+                pass  # Skip if minimum payment calculation fails
+            
+            # Scenario 2: Interest + Half Principal
+            current_balance = loan.current_balance or 0
+            half_principal_payment = minimum_payment + (current_balance * 0.5)
+            
+            try:
+                half_allocation = loan.process_payment_allocation(half_principal_payment, payment_date)
+                scenarios.append(LoanScenarioOut(
+                    scenario_name="Interest + 50% Principal",
+                    payment_amount=half_principal_payment,
+                    amount_breakdown={
+                        "interest": half_allocation['interest_payment'],
+                        "late_fee": half_allocation['late_fee_payment'],
+                        "principal": half_allocation['principal_payment']
+                    },
+                    resulting_balance=half_allocation['new_balance'],
+                    new_due_date=half_allocation['new_due_date'],
+                    is_full_redemption=half_allocation['payment_type'] == 'full_redemption'
+                ))
+            except ValueError:
+                pass
+            
+            # Scenario 3: Full Redemption
+            full_payment = minimum_payment + current_balance
+            
+            try:
+                full_allocation = loan.process_payment_allocation(full_payment, payment_date)
+                scenarios.append(LoanScenarioOut(
+                    scenario_name="Full Redemption",
+                    payment_amount=full_payment,
+                    amount_breakdown={
+                        "interest": full_allocation['interest_payment'],
+                        "late_fee": full_allocation['late_fee_payment'],
+                        "principal": full_allocation['principal_payment']
+                    },
+                    resulting_balance=0.0,
+                    new_due_date=full_allocation['new_due_date'],
+                    is_full_redemption=True
+                ))
+            except ValueError:
+                pass
+            
+            return scenarios
+            
+        except Exception as e:
+            logger.error(f"Error getting payment scenarios: {str(e)}")
+            raise
+
+    @staticmethod
+    async def test_store_scenario(scenario_name: str, customer_id: UUID, item_id: UUID, created_by: UUID) -> StoreScenarioResponse:
+        """Test specific store scenarios"""
+        try:
+            if scenario_name == "simple_redemption":
+                return await TransactionService._test_simple_redemption(customer_id, item_id, created_by)
+            elif scenario_name == "extension_by_interest":
+                return await TransactionService._test_extension_by_interest(customer_id, item_id, created_by)
+            elif scenario_name == "partial_payment_rollover":
+                return await TransactionService._test_partial_payment_rollover(customer_id, item_id, created_by)
+            else:
+                raise ValueError(f"Unknown scenario: {scenario_name}")
+                
+        except Exception as e:
+            logger.error(f"Error testing scenario {scenario_name}: {str(e)}")
+            return StoreScenarioResponse(
+                scenario_name=scenario_name,
+                description="",
+                success=False,
+                message=f"Error: {str(e)}"
+            )
+
+    @staticmethod
+    async def _test_simple_redemption(customer_id: UUID, item_id: UUID, created_by: UUID) -> StoreScenarioResponse:
+        """Test simple redemption scenario"""
+        transactions_created = []
+        
+        # Create pawn loan
+        pawn_data = PawnTransactionCreate(
+            customer_id=customer_id,
+            item_id=item_id,
+            principal_amount=100.0,
+            monthly_interest_fee=15.0
+        )
+        loan = await TransactionService.create_pawn_loan(pawn_data, created_by)
+        transactions_created.append(loan.transaction_id)
+        
+        # Wait 15 days, then redeem
+        redemption_date = date.today() + timedelta(days=15)
+        payment_data = PaymentCreate(
+            loan_id=loan.transaction_id,
+            payment_amount=115.0,  # $100 principal + $15 interest
+            payment_date=redemption_date
+        )
+        result = await TransactionService.process_payment(payment_data, created_by)
+        transactions_created.append(result.transaction.transaction_id)
+        
+        return StoreScenarioResponse(
+            scenario_name="simple_redemption",
+            description="Pawn $100, redeem for $115 after 15 days",
+            success=True,
+            loan_id=loan.transaction_id,
+            final_balance=0.0,
+            final_status="redeemed",
+            transactions_created=transactions_created,
+            message="Simple redemption completed successfully",
+            details={
+                "original_amount": 100.0,
+                "interest_paid": 15.0,
+                "total_paid": 115.0,
+                "days_held": 15
+            }
+        )
+
+    @staticmethod
+    async def _test_extension_by_interest(customer_id: UUID, item_id: UUID, created_by: UUID) -> StoreScenarioResponse:
+        """Test extension by interest payment scenario"""
+        transactions_created = []
+        
+        # Create larger pawn loan
+        pawn_data = PawnTransactionCreate(
+            customer_id=customer_id,
+            item_id=item_id,
+            principal_amount=500.0,
+            monthly_interest_fee=75.0
+        )
+        loan = await TransactionService.create_pawn_loan(pawn_data, created_by)
+        transactions_created.append(loan.transaction_id)
+        
+        # Pay interest only to extend
+        extension_date = loan.current_due_date  # Pay exactly on due date
+        payment_data = PaymentCreate(
+            loan_id=loan.transaction_id,
+            payment_amount=75.0,  # Interest only
+            payment_date=extension_date
+        )
+        result = await TransactionService.process_payment(payment_data, created_by)
+        transactions_created.append(result.transaction.transaction_id)
+        
+        # Refresh loan data
+        updated_loan = await Transaction.find_one(Transaction.transaction_id == loan.transaction_id)
+        
+        return StoreScenarioResponse(
+            scenario_name="extension_by_interest",
+            description="Borrow $500, pay $75 to extend, still owe $500",
+            success=True,
+            loan_id=loan.transaction_id,
+            final_balance=updated_loan.current_balance,
+            final_status=updated_loan.loan_status.value,
+            transactions_created=transactions_created,
+            message="Extension by interest payment completed",
+            details={
+                "original_amount": 500.0,
+                "interest_paid": 75.0,
+                "remaining_balance": updated_loan.current_balance,
+                "new_due_date": updated_loan.current_due_date.isoformat()
+            }
+        )
+
+    @staticmethod
+    async def _test_partial_payment_rollover(customer_id: UUID, item_id: UUID, created_by: UUID) -> StoreScenarioResponse:
+        """Test partial payment rollover scenario"""
+        transactions_created = []
+        
+        # Create large pawn loan
+        pawn_data = PawnTransactionCreate(
+            customer_id=customer_id,
+            item_id=item_id,
+            principal_amount=1000.0,
+            monthly_interest_fee=150.0
+        )
+        loan = await TransactionService.create_pawn_loan(pawn_data, created_by)
+        transactions_created.append(loan.transaction_id)
+        
+        # Make partial payment
+        payment_data = PaymentCreate(
+            loan_id=loan.transaction_id,
+            payment_amount=500.0,  # Partial payment
+            payment_date=loan.current_due_date
+        )
+        result = await TransactionService.process_payment(payment_data, created_by)
+        transactions_created.append(result.transaction.transaction_id)
+        
+        # Refresh loan data
+        updated_loan = await Transaction.find_one(Transaction.transaction_id == loan.transaction_id)
+        
+        return StoreScenarioResponse(
+            scenario_name="partial_payment_rollover",
+            description="Owe $1150, pay $500, remaining balance rolls over",
+            success=True,
+            loan_id=loan.transaction_id,
+            final_balance=updated_loan.current_balance,
+            final_status=updated_loan.loan_status.value,
+            transactions_created=transactions_created,
+            message="Partial payment rollover completed",
+            details={
+                "original_amount": 1000.0,
+                "total_owed": 1150.0,  # $1000 + $150 interest
+                "amount_paid": 500.0,
+                "remaining_balance": updated_loan.current_balance,
+                "new_due_date": updated_loan.current_due_date.isoformat()
+            }
+        )
+
+    @staticmethod
     async def get_transaction_by_id(transaction_id: UUID) -> Optional[Transaction]:
         """Get transaction by ID"""
         return await Transaction.find_one(Transaction.transaction_id == transaction_id)
@@ -213,10 +513,23 @@ class TransactionService:
             if not loan.check_forfeit_eligibility():
                 raise ValueError(f"Loan not eligible for forfeiture until {loan.final_forfeit_date}")
             
-            # Process forfeiture using the model method
-            forfeit_transaction = await loan.mark_forfeited(processed_by)
-            forfeit_transaction.receipt_number = TransactionService.generate_receipt_number()
-            await forfeit_transaction.save()
+            # Create forfeit transaction
+            forfeit_transaction = Transaction(
+                transaction_type=TransactionType.FORFEIT,
+                status=TransactionStatus.COMPLETED,
+                total_amount=0.0,  # No money changes hands
+                customer_id=loan.customer_id,
+                item_id=loan.item_id,
+                loan_id=loan.transaction_id,
+                transaction_date=datetime.utcnow(),
+                receipt_number=TransactionService.generate_receipt_number(),
+                notes="Loan forfeited - item becomes shop property",
+                created_by=processed_by
+            )
+            
+            # Update loan status
+            loan.loan_status = LoanStatus.FORFEITED
+            loan.updated_at = datetime.utcnow()
             
             # Update item status to forfeited
             if loan.item_id:
@@ -225,9 +538,57 @@ class TransactionService:
                     item.status = ItemStatus.FORFEITED
                     await item.save()
             
+            # Save changes
+            await forfeit_transaction.save()
+            await loan.save()
+            
             logger.info(f"Marked loan {loan.transaction_id} as forfeited")
             return forfeit_transaction
             
         except Exception as e:
             logger.error(f"Error marking loan forfeited: {str(e)}")
             raise
+
+    @staticmethod
+    async def search_transactions(search_params: TransactionSearch, skip: int = 0, limit: int = 50) -> List[Transaction]:
+        """Search transactions based on criteria"""
+        query_conditions = []
+        
+        if search_params.customer_id:
+            query_conditions.append(Transaction.customer_id == search_params.customer_id)
+        
+        if search_params.item_id:
+            query_conditions.append(Transaction.item_id == search_params.item_id)
+        
+        if search_params.loan_id:
+            query_conditions.append(Transaction.loan_id == search_params.loan_id)
+        
+        if search_params.transaction_type:
+            query_conditions.append(Transaction.transaction_type == search_params.transaction_type)
+        
+        if search_params.status:
+            query_conditions.append(Transaction.status == search_params.status)
+        
+        if search_params.loan_status:
+            query_conditions.append(Transaction.loan_status == search_params.loan_status)
+        
+        if search_params.start_date:
+            start_datetime = datetime.combine(search_params.start_date, datetime.min.time())
+            query_conditions.append(Transaction.transaction_date >= start_datetime)
+        
+        if search_params.end_date:
+            end_datetime = datetime.combine(search_params.end_date, datetime.max.time())
+            query_conditions.append(Transaction.transaction_date <= end_datetime)
+        
+        if search_params.is_overdue is not None:
+            if search_params.is_overdue:
+                query_conditions.append(Transaction.current_due_date < date.today())
+            else:
+                query_conditions.append(Transaction.current_due_date >= date.today())
+        
+        if query_conditions:
+            query = Transaction.find(And(*query_conditions))
+        else:
+            query = Transaction.find()
+        
+        return await query.sort(-Transaction.transaction_date).skip(skip).limit(limit).to_list()

@@ -1,4 +1,4 @@
-# backend/app/models/transaction_model.py
+# backend/app/models/transaction_model.py - FIXED VERSION
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timedelta
 from uuid import UUID, uuid4
@@ -191,15 +191,18 @@ class Transaction(Document):
         three_months_later = self.calculate_next_due_date_from_original(3)
         return three_months_later + timedelta(days=14)
 
+    def check_forfeit_eligibility(self) -> bool:
+        """Check if loan is eligible for forfeiture"""
+        if not self.final_forfeit_date:
+            return False
+        return date.today() >= self.final_forfeit_date
+
     def process_payment_allocation(self, payment_amount: float, payment_date: date) -> Dict[str, Any]:
-        """
-        Process payment allocation based on store scenarios
-        """
+        """Process payment allocation based on store scenarios"""
         if not self.monthly_interest_fee or not self.current_balance:
             raise ValueError("Invalid loan state for payment processing")
         
         current_interest_due = self.monthly_interest_fee
-        current_total_owed = self.calculate_amount_owed_at_date(payment_date)
         
         # Minimum payment is interest amount
         if payment_amount < current_interest_due:
