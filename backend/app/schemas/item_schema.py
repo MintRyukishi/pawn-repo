@@ -1,4 +1,4 @@
-# backend/app/schemas/item_schema.py (SIMPLIFIED VERSION)
+# backend/app/schemas/item_schema.py - FIXED FOR COPY-PASTE
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
@@ -8,7 +8,6 @@ from app.models.item_model import ItemStatus
 class ItemBase(BaseModel):
     description: str = Field(..., min_length=1, max_length=500, description="What is this item?")
     serial_number: Optional[str] = Field(None, max_length=100, description="Serial number if available")
-    storage_location: Optional[str] = Field(None, max_length=100, description="Where is this item stored?")
     loan_amount: float = Field(..., gt=0, description="Amount loaned for this item")
     internal_notes: Optional[str] = Field(None, max_length=1000, description="Internal notes - not visible to customer")
 
@@ -18,7 +17,6 @@ class ItemCreate(ItemBase):
 class ItemUpdate(BaseModel):
     description: Optional[str] = Field(None, min_length=1, max_length=500)
     serial_number: Optional[str] = Field(None, max_length=100)
-    storage_location: Optional[str] = Field(None, max_length=100, description="Where is this item stored?")
     loan_amount: Optional[float] = Field(None, gt=0)
     status: Optional[ItemStatus] = None
     internal_notes: Optional[str] = Field(None, max_length=1000)
@@ -40,7 +38,6 @@ class ItemSearch(BaseModel):
     status: Optional[ItemStatus] = None
     customer_id: Optional[UUID] = None
     serial_number: Optional[str] = None
-    storage_location: Optional[str] = None  # Search by storage location
 
 # For customer receipts - excludes internal notes
 class ItemReceipt(BaseModel):

@@ -1,4 +1,4 @@
-# backend/app/models/transaction_model.py - FIXED VERSION
+# backend/app/models/transaction_model.py - FIXED FOR COPY-PASTE
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timedelta
 from uuid import UUID, uuid4
@@ -62,7 +62,7 @@ class Transaction(Document):
     transaction_date: datetime = Field(default_factory=datetime.utcnow)
     original_due_date: Optional[date] = Field(None, description="Original payment due date (1 month from pawn)")
     current_due_date: Optional[date] = Field(None, description="Current due date (updated with renewals)")
-    final_forfeit_date: Optional[date] = Field(None, description="Date item will be forfeited (3 months + 2 week grace)")
+    final_forfeit_date: Optional[date] = Field(None, description="Date item will be forfeited (3 months + 1 week grace)")
     
     # Renewal tracking
     renewals_count: int = Field(default=0, description="Number of times this loan has been renewed")
@@ -115,10 +115,10 @@ class Transaction(Document):
     @computed_field
     @property
     def is_within_grace_period(self) -> bool:
-        """Check if within 1-week grace period after due date"""
-        if not self.is_overdue:
+        """Check if within 1-week grace period after 3 months no activity"""
+        if not self.final_forfeit_date:
             return True
-        return self.days_overdue <= 7
+        return date.today() < self.final_forfeit_date
 
     @computed_field
     @property
@@ -149,14 +149,6 @@ class Transaction(Document):
         
         return base_amount
 
-    def calculate_late_fee(self) -> float:
-        """Calculate late fee based on days overdue"""
-        if not self.is_overdue or self.is_within_grace_period:
-            return 0.0
-        
-        # Beyond 1 week = $10 late fee (configurable)
-        return 10.0
-
     def calculate_next_due_date_from_original(self, months_to_add: int) -> date:
         """Calculate next due date from original due date (store policy)"""
         if not self.original_due_date:
@@ -183,13 +175,13 @@ class Transaction(Document):
         return next_date
 
     def calculate_forfeit_date(self) -> date:
-        """Calculate forfeiture date (3 months + 2 week grace period)"""
+        """Calculate forfeiture date (3 months + 1 week grace period)"""
         if not self.original_due_date:
-            return date.today() + timedelta(days=105)  # ~3.5 months
+            return date.today() + timedelta(days=97)  # ~3.2 months
         
-        # 3 months from original due date + 2 weeks grace
+        # 3 months from original due date + 1 week grace
         three_months_later = self.calculate_next_due_date_from_original(3)
-        return three_months_later + timedelta(days=14)
+        return three_months_later + timedelta(days=7)
 
     def check_forfeit_eligibility(self) -> bool:
         """Check if loan is eligible for forfeiture"""
@@ -222,20 +214,13 @@ class Transaction(Document):
         
         remaining_payment = payment_amount
         
-        # 1. Pay late fee first (if applicable)
-        late_fee = self.calculate_late_fee()
-        if late_fee > 0:
-            fee_payment = min(remaining_payment, late_fee)
-            allocation['late_fee_payment'] = fee_payment
-            remaining_payment -= fee_payment
-        
-        # 2. Pay interest (minimum requirement)
+        # 1. Pay interest (minimum requirement)
         if remaining_payment >= current_interest_due:
             allocation['interest_payment'] = current_interest_due
             remaining_payment -= current_interest_due
             allocation['months_extended'] = 1
             
-            # 3. Apply any remaining to principal
+            # 2. Apply any remaining to principal
             if remaining_payment > 0:
                 if remaining_payment >= self.current_balance:
                     # Full redemption

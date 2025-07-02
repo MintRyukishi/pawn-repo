@@ -1,4 +1,4 @@
-# backend/app/services/transaction_service.py - COMPLETED VERSION
+# backend/app/services/transaction_service.py - FIXED FOR COPY-PASTE
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime, date, timedelta
@@ -43,10 +43,11 @@ class TransactionService:
             if item.status != ItemStatus.ACTIVE:
                 raise ValueError(f"Item is not available for pawn - status: {item.status}")
             
-            # Calculate dates
+            # Calculate dates using simplified V1 policy
             pawn_date = date.today()
             due_date = pawn_date + timedelta(days=30)  # 1 month from today
-            forfeit_date = due_date + timedelta(days=105)  # 3 months + 2 week grace
+            # Store policy: 3 months + 1 week grace = forfeiture (97 days total)
+            forfeit_date = due_date + timedelta(days=67)  # 30 + 67 = 97 total days
             
             # Create pawn transaction
             transaction = Transaction(
@@ -269,8 +270,7 @@ class TransactionService:
             
             # Scenario 1: Interest Only (Minimum Payment)
             interest_amount = loan.monthly_interest_fee or 0
-            late_fee = loan.calculate_late_fee()
-            minimum_payment = interest_amount + late_fee
+            minimum_payment = interest_amount
             
             try:
                 min_allocation = loan.process_payment_allocation(minimum_payment, payment_date)
@@ -279,7 +279,6 @@ class TransactionService:
                     payment_amount=minimum_payment,
                     amount_breakdown={
                         "interest": min_allocation['interest_payment'],
-                        "late_fee": min_allocation['late_fee_payment'],
                         "principal": 0.0
                     },
                     resulting_balance=min_allocation['new_balance'],
@@ -300,7 +299,6 @@ class TransactionService:
                     payment_amount=half_principal_payment,
                     amount_breakdown={
                         "interest": half_allocation['interest_payment'],
-                        "late_fee": half_allocation['late_fee_payment'],
                         "principal": half_allocation['principal_payment']
                     },
                     resulting_balance=half_allocation['new_balance'],
@@ -320,7 +318,6 @@ class TransactionService:
                     payment_amount=full_payment,
                     amount_breakdown={
                         "interest": full_allocation['interest_payment'],
-                        "late_fee": full_allocation['late_fee_payment'],
                         "principal": full_allocation['principal_payment']
                     },
                     resulting_balance=0.0,
@@ -335,6 +332,109 @@ class TransactionService:
         except Exception as e:
             logger.error(f"Error getting payment scenarios: {str(e)}")
             raise
+
+    @staticmethod
+    async def mark_loan_forfeited(loan_id: UUID, processed_by: UUID) -> Transaction:
+        """Mark a loan as forfeited"""
+        try:
+            # Get original loan
+            loan = await Transaction.find_one(
+                And(
+                    Transaction.transaction_id == loan_id,
+                    Transaction.transaction_type == TransactionType.PAWN
+                )
+            )
+            if not loan:
+                raise ValueError("Loan not found")
+            
+            # Check if eligible for forfeiture
+            if not loan.check_forfeit_eligibility():
+                raise ValueError(f"Loan not eligible for forfeiture until {loan.final_forfeit_date}")
+            
+            # Create forfeit transaction
+            forfeit_transaction = Transaction(
+                transaction_type=TransactionType.FORFEIT,
+                status=TransactionStatus.COMPLETED,
+                total_amount=0.0,  # No money changes hands
+                customer_id=loan.customer_id,
+                item_id=loan.item_id,
+                loan_id=loan.transaction_id,
+                transaction_date=datetime.utcnow(),
+                receipt_number=TransactionService.generate_receipt_number(),
+                notes="Loan forfeited - item becomes shop property",
+                created_by=processed_by
+            )
+            
+            # Update loan status
+            loan.loan_status = LoanStatus.FORFEITED
+            loan.updated_at = datetime.utcnow()
+            
+            # Update item status to forfeited
+            if loan.item_id:
+                item = await Item.find_one(Item.item_id == loan.item_id)
+                if item:
+                    item.status = ItemStatus.FORFEITED
+                    await item.save()
+            
+            # Save changes
+            await forfeit_transaction.save()
+            await loan.save()
+            
+            logger.info(f"Marked loan {loan.transaction_id} as forfeited")
+            return forfeit_transaction
+            
+        except Exception as e:
+            logger.error(f"Error marking loan forfeited: {str(e)}")
+            raise
+
+    @staticmethod
+    async def search_transactions(search_params: TransactionSearch, skip: int = 0, limit: int = 50) -> List[Transaction]:
+        """Search transactions based on criteria"""
+        query_conditions = []
+        
+        if search_params.customer_id:
+            query_conditions.append(Transaction.customer_id == search_params.customer_id)
+        
+        if search_params.item_id:
+            query_conditions.append(Transaction.item_id == search_params.item_id)
+        
+        if search_params.loan_id:
+            query_conditions.append(Transaction.loan_id == search_params.loan_id)
+        
+        if search_params.transaction_type:
+            query_conditions.append(Transaction.transaction_type == search_params.transaction_type)
+        
+        if search_params.status:
+            query_conditions.append(Transaction.status == search_params.status)
+        
+        if search_params.loan_status:
+            query_conditions.append(Transaction.loan_status == search_params.loan_status)
+        
+        if search_params.start_date:
+            start_datetime = datetime.combine(search_params.start_date, datetime.min.time())
+            query_conditions.append(Transaction.transaction_date >= start_datetime)
+        
+        if search_params.end_date:
+            end_datetime = datetime.combine(search_params.end_date, datetime.max.time())
+            query_conditions.append(Transaction.transaction_date <= end_datetime)
+        
+        if search_params.is_overdue is not None:
+            if search_params.is_overdue:
+                query_conditions.append(Transaction.current_due_date < date.today())
+            else:
+                query_conditions.append(Transaction.current_due_date >= date.today())
+        
+        if query_conditions:
+            query = Transaction.find(And(*query_conditions))
+        else:
+            query = Transaction.find()
+        
+        return await query.sort(-Transaction.transaction_date).skip(skip).limit(limit).to_list()
+
+    @staticmethod
+    async def get_transaction_by_id(transaction_id: UUID) -> Optional[Transaction]:
+        """Get transaction by ID"""
+        return await Transaction.find_one(Transaction.transaction_id == transaction_id)
 
     @staticmethod
     async def test_store_scenario(scenario_name: str, customer_id: UUID, item_id: UUID, created_by: UUID) -> StoreScenarioResponse:
@@ -489,106 +589,3 @@ class TransactionService:
                 "new_due_date": updated_loan.current_due_date.isoformat()
             }
         )
-
-    @staticmethod
-    async def get_transaction_by_id(transaction_id: UUID) -> Optional[Transaction]:
-        """Get transaction by ID"""
-        return await Transaction.find_one(Transaction.transaction_id == transaction_id)
-
-    @staticmethod
-    async def mark_loan_forfeited(loan_id: UUID, processed_by: UUID) -> Transaction:
-        """Mark a loan as forfeited"""
-        try:
-            # Get original loan
-            loan = await Transaction.find_one(
-                And(
-                    Transaction.transaction_id == loan_id,
-                    Transaction.transaction_type == TransactionType.PAWN
-                )
-            )
-            if not loan:
-                raise ValueError("Loan not found")
-            
-            # Check if eligible for forfeiture
-            if not loan.check_forfeit_eligibility():
-                raise ValueError(f"Loan not eligible for forfeiture until {loan.final_forfeit_date}")
-            
-            # Create forfeit transaction
-            forfeit_transaction = Transaction(
-                transaction_type=TransactionType.FORFEIT,
-                status=TransactionStatus.COMPLETED,
-                total_amount=0.0,  # No money changes hands
-                customer_id=loan.customer_id,
-                item_id=loan.item_id,
-                loan_id=loan.transaction_id,
-                transaction_date=datetime.utcnow(),
-                receipt_number=TransactionService.generate_receipt_number(),
-                notes="Loan forfeited - item becomes shop property",
-                created_by=processed_by
-            )
-            
-            # Update loan status
-            loan.loan_status = LoanStatus.FORFEITED
-            loan.updated_at = datetime.utcnow()
-            
-            # Update item status to forfeited
-            if loan.item_id:
-                item = await Item.find_one(Item.item_id == loan.item_id)
-                if item:
-                    item.status = ItemStatus.FORFEITED
-                    await item.save()
-            
-            # Save changes
-            await forfeit_transaction.save()
-            await loan.save()
-            
-            logger.info(f"Marked loan {loan.transaction_id} as forfeited")
-            return forfeit_transaction
-            
-        except Exception as e:
-            logger.error(f"Error marking loan forfeited: {str(e)}")
-            raise
-
-    @staticmethod
-    async def search_transactions(search_params: TransactionSearch, skip: int = 0, limit: int = 50) -> List[Transaction]:
-        """Search transactions based on criteria"""
-        query_conditions = []
-        
-        if search_params.customer_id:
-            query_conditions.append(Transaction.customer_id == search_params.customer_id)
-        
-        if search_params.item_id:
-            query_conditions.append(Transaction.item_id == search_params.item_id)
-        
-        if search_params.loan_id:
-            query_conditions.append(Transaction.loan_id == search_params.loan_id)
-        
-        if search_params.transaction_type:
-            query_conditions.append(Transaction.transaction_type == search_params.transaction_type)
-        
-        if search_params.status:
-            query_conditions.append(Transaction.status == search_params.status)
-        
-        if search_params.loan_status:
-            query_conditions.append(Transaction.loan_status == search_params.loan_status)
-        
-        if search_params.start_date:
-            start_datetime = datetime.combine(search_params.start_date, datetime.min.time())
-            query_conditions.append(Transaction.transaction_date >= start_datetime)
-        
-        if search_params.end_date:
-            end_datetime = datetime.combine(search_params.end_date, datetime.max.time())
-            query_conditions.append(Transaction.transaction_date <= end_datetime)
-        
-        if search_params.is_overdue is not None:
-            if search_params.is_overdue:
-                query_conditions.append(Transaction.current_due_date < date.today())
-            else:
-                query_conditions.append(Transaction.current_due_date >= date.today())
-        
-        if query_conditions:
-            query = Transaction.find(And(*query_conditions))
-        else:
-            query = Transaction.find()
-        
-        return await query.sort(-Transaction.transaction_date).skip(skip).limit(limit).to_list()

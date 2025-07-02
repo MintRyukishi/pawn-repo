@@ -1,4 +1,4 @@
-# backend/app/models/item_model.py (SIMPLIFIED VERSION)
+# backend/app/models/item_model.py - FIXED FOR COPY-PASTE
 from typing import Optional
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -14,10 +14,9 @@ class ItemStatus(str, Enum):
 class Item(Document):
     item_id: UUID = Field(default_factory=uuid4)
     
-    # Basic item information
+    # Basic item information - SIMPLIFIED FOR V1
     description: str = Field(..., min_length=1, max_length=500, description="What is this item?")
     serial_number: Optional[str] = Field(None, max_length=100, description="Serial number if available")
-    storage_location: Optional[str] = Field(None, max_length=100, description="Where is this item stored? (e.g., 'Shelf A-3', 'Safe Box 12', 'Back Room Bin 5')")
     
     # Financial details
     loan_amount: float = Field(..., gt=0, description="Amount loaned for this item")

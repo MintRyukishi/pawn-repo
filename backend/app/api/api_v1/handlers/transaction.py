@@ -1,4 +1,4 @@
-# backend/app/api/api_v1/handlers/transaction.py
+# backend/app/api/api_v1/handlers/transaction.py - SIMPLIFIED VERSION 1
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from uuid import UUID
@@ -25,16 +25,16 @@ async def create_pawn_loan(
     """
     Create a new pawn loan transaction.
     
-    **Store Policy Implementation:**
+    **Store Policy Implementation (Simplified Version 1):**
     - 1-month initial term
     - Cash only
     - Principal amount goes to customer
     - Monthly interest fee for renewals
-    - 3-month + 2-week grace period before forfeiture
+    - 3-month + 1-week grace period before forfeiture
     
     **Example:**
     Customer pawns ring for $100 with $15/month interest.
-    Due: 30 days from today. Forfeit: 105 days from today.
+    Due: 30 days from today. Forfeit: 97 days from today.
     """
     try:
         transaction = await TransactionService.create_pawn_loan(pawn_data, current_user.user_id)
@@ -63,8 +63,7 @@ async def process_payment(
     
     **Smart Payment Logic:**
     - Automatically determines if renewal, partial payment, or full redemption
-    - Applies late fees if beyond 1-week grace period
-    - Allocates to interest first, then principal
+    - Applies interest first, then principal
     - Calculates new due dates from original due date (store policy)
     - Handles overpayments appropriately
     
@@ -72,7 +71,6 @@ async def process_payment(
     - **Interest-only renewal**: Pay monthly fee to extend
     - **Partial payment**: Pay toward principal + interest 
     - **Full redemption**: Pay complete balance
-    - **Late payment**: Automatic late fee calculation
     - **Advance payment**: Pay multiple months ahead
     """
     try:
@@ -138,7 +136,7 @@ async def get_payment_scenarios(
     
     **Shows for each scenario:**
     - Exact payment amount required
-    - How payment is allocated (interest/principal/fees)
+    - How payment is allocated (interest/principal)
     - Resulting balance after payment
     - New due date
     """
@@ -200,41 +198,7 @@ async def test_store_scenario(
             detail="Failed to test scenario"
         )
 
-# ========== TRADITIONAL ENDPOINTS (BACKWARDS COMPATIBLE) ==========
-
-@transaction_router.post("/redemption", summary="Process full redemption", response_model=TransactionOut)
-async def process_redemption(
-    loan_id: UUID,
-    total_payment: float,
-    payment_method: str = "cash",
-    notes: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Process full redemption (backwards compatible endpoint).
-    Use /payment endpoint for more advanced features.
-    """
-    try:
-        payment_data = PaymentCreate(
-            loan_id=loan_id,
-            payment_amount=total_payment,
-            payment_date=date.today(),
-            notes=notes or "Full redemption"
-        )
-        
-        result = await TransactionService.process_payment(payment_data, current_user.user_id)
-        return result.transaction
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error processing redemption: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process redemption"
-        )
+# ========== FORFEITURE ==========
 
 @transaction_router.post("/forfeit/{loan_id}", summary="Mark loan as forfeited", response_model=TransactionOut)
 async def mark_loan_forfeited(
@@ -243,7 +207,7 @@ async def mark_loan_forfeited(
 ):
     """
     Mark a loan as forfeited (item becomes shop property).
-    Only allowed after 3+ months without payment.
+    Only allowed after 3+ months without payment + 1 week grace.
     """
     try:
         transaction = await TransactionService.mark_loan_forfeited(loan_id, current_user.user_id)
@@ -273,9 +237,8 @@ async def get_payment_rules(
         "payment_method": "Cash only",
         "minimum_payment": "Monthly interest fee",
         "extension_period": "Full months only (30, 60, 90 days)",
-        "grace_period": "1 week after due date (late fee after)",
-        "late_fee": "$10 after 1 week grace period", 
-        "forfeiture": "3 months + 2 weeks from original due date",
+        "grace_period": "1 week after 3 months no activity",
+        "forfeiture": "3 months + 1 week from original due date",
         "renewal_calculation": "Always from original due date",
         "advance_payments": "Allowed - pay multiple months ahead",
         "partial_payments": "Allowed - applied to principal after interest",
@@ -307,11 +270,6 @@ async def get_scenario_examples(
                 "example": "Owe $1150, pay $500, remaining $650 + interest rolls over"
             },
             {
-                "name": "Late Payment",
-                "description": "Customer pays after grace period",
-                "example": "Due Feb 1, pay Feb 10 = $10 late fee + payment"
-            },
-            {
                 "name": "Advance Payment",
                 "description": "Customer pays multiple months ahead",
                 "example": "Pay $225 (3 months interest) extends 3 months from original due"
@@ -320,7 +278,7 @@ async def get_scenario_examples(
         "key_rules": [
             "Renewals always calculated from original due date",
             "Interest paid first, then principal",
-            "Grace period = 1 week, then late fees apply",
-            "Forfeiture = 3 months + 2 weeks from original due"
+            "Grace period = 1 week after 3 months no activity",
+            "Forfeiture = 3 months + 1 week from original due"
         ]
     }

@@ -1,4 +1,4 @@
-# backend/app/schemas/transaction_schema.py - FIXED VERSION (Duplicates Removed)
+# backend/app/schemas/transaction_schema.py - FIXED FOR COPY-PASTE
 from uuid import UUID
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
