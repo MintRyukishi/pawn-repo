@@ -1,4 +1,3 @@
-# backend/app/models/item_model.py - FIXED FOR COPY-PASTE
 from typing import Optional
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -20,6 +19,7 @@ class Item(Document):
     
     # Financial details
     loan_amount: float = Field(..., gt=0, description="Amount loaned for this item")
+    storage_location: Optional[str] = Field(None, max_length=100, description="Where is this item stored?")
     
     # Status and ownership
     status: ItemStatus = Field(default=ItemStatus.ACTIVE)
