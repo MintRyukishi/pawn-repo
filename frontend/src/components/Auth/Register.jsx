@@ -3,18 +3,11 @@ import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import ThemeToggler from '../Theme/ThemeToggler';
 
-export const Login = () => {
+export const Register = () => {
     const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm();
     
     const onSubmit = async (values) => {
-        try {
-            console.log(values);
-            // Add your login logic here
-            // await loginUser(values);
-            // navigate('/dashboard');
-        } catch (error) {
-            console.error('Login failed:', error);
-        }
+        console.log(values);
     };
     
     const navigate = useNavigate();
@@ -31,15 +24,43 @@ export const Login = () => {
                 width="100%"
             >
                 <Heading mb={6}>
-                    Login
+                    Register
                 </Heading>
                 
                 <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
+                    <FormControl isInvalid={errors.username}>
+                        <Input
+                            placeholder="Username"
+                            type="text"
+                            autoFocus
+                            background={useColorModeValue('gray.300', 'gray.600')}
+                            size="lg"
+                            mt={6}
+                            {...register('username', {
+                                required: 'Username is required',
+                                minLength: {
+                                    value: 3,
+                                    message: 'Username must be at least 3 characters'
+                                },
+                                maxLength: {
+                                    value: 20,
+                                    message: 'Username must be less than 20 characters'
+                                },
+                                pattern: {
+                                    value: /^[a-zA-Z0-9_]+$/,
+                                    message: 'Username can only contain letters, numbers, and underscores'
+                                }
+                            })}
+                        />
+                        <FormErrorMessage>
+                            {errors.username && errors.username.message}
+                        </FormErrorMessage>
+                    </FormControl>
+                    
                     <FormControl isInvalid={errors.email}>
                         <Input
                             placeholder="Email"
                             type="email"
-                            autoFocus
                             background={useColorModeValue('gray.300', 'gray.600')}
                             size="lg"
                             mt={6}
@@ -89,9 +110,9 @@ export const Login = () => {
                         mt={6}
                         mb={6}
                         isLoading={isSubmitting}
-                        loadingText="Logging in..."
+                        loadingText="Registering..."
                     >
-                        Login
+                        Register
                     </Button>
                 </form>
                 
@@ -103,13 +124,13 @@ export const Login = () => {
                     size="lg"
                     width="100%"
                     mt={6}
-                    onClick={() => navigate('/register', { replace: true })}
+                    onClick={() => navigate('/login', { replace: true })}
                 >
-                    Register Instead
+                    Login Instead
                 </Button>
             </Flex>
         </Flex>
     );
 };
 
-export default Login;
+export default Register;
